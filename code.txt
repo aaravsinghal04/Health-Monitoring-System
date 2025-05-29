@@ -1,0 +1,119 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+import serial
+import time
+import warnings
+import requests  # For ThingSpeak
+api = "CVKU9KD2D55RA9SX"  # ThingSpeak API key
+warnings.filterwarnings("ignore")
+ser = serial.Serial('COM23', baudrate=9600)  # Adjust COM port and baudrate as needed
+print("Serial connection opened successfully!")
+
+# Load data from an Excel sheet and split into features and labels
+data = pd.read_excel("tk15009.xlsx", engine="openpyxl")
+
+feature_1 = data[['Temperature']]
+feature_2 = data[['BPM']]
+feature_3 = data[['Mems']]
+
+label_1 = data['label_Temperature']
+label_2 = data['label_BPM']
+label_3 = data['label_Mems']
+
+# Split the data into training and testing sets for each parameter
+X_train_1, X_test_1, y_train_1, y_test_1 = train_test_split(feature_1, label_1, test_size=0.2, random_state=42)
+X_train_2, X_test_2, y_train_2, y_test_2 = train_test_split(feature_2, label_2, test_size=0.2, random_state=42)
+X_train_3, X_test_3, y_train_3, y_test_3 = train_test_split(feature_3, label_3, test_size=0.2, random_state=42)
+
+# Build Random Forest models for each parameter
+model_1 = RandomForestClassifier(random_state=42)
+model_1.fit(X_train_1, y_train_1)
+
+
+model_2 = RandomForestClassifier(random_state=42)
+model_2.fit(X_train_2, y_train_2)
+
+model_3 = RandomForestClassifier(random_state=42)
+model_3.fit(X_train_3, y_train_3)
+
+
+def readData():
+    time.sleep(1)
+    serial_data = ser.readline().decode().strip()
+    
+    print("\n----------------------------")
+    print("     -= Data Received =- ")
+    print("----------------------------\n")
+    print("Data:", serial_data, "\n")
+    time.sleep(1)
+
+    a = serial_data.find("a")
+    b = serial_data.find("b")
+    a += 1 
+    Temperature = float(serial_data[a:b])
+    print("Temperature:", Temperature)
+
+
+    c = serial_data.find("b")
+    a = serial_data.find("c")
+    c += 1
+    BPM = int(serial_data[c:a])
+    print("BPM:", BPM)
+
+    b = serial_data.find("c")
+    c = serial_data.find("d")
+    b += 1
+    Mems = int(serial_data[b:c])
+    print("Mems:", Mems)
+
+
+    return Temperature, BPM, Mems
+
+while True:
+    Temperature, BPM, Mems  = readData()
+    time.sleep(1)
+    print("Uploading data to webserver....")
+    time.sleep(2)
+
+    queries = {"api_key": api, "field1": Temperature, "field3": BPM}
+    r = requests.get('https://api.thingspeak.com/update', params=queries)
+
+    if r.status_code == requests.codes.ok:
+        print("Data Successfully Uploaded!")
+    else:
+        print("Error Code: " + str(r.status_code))
+        time.sleep(1)
+
+    x_prediction = model_1.predict([[Temperature]])[0]
+    z_prediction = model_2.predict([[BPM]])[0]
+    w_prediction = model_3.predict([[Mems]])[0]
+
+    print("\nPredictions:")
+    print(f'X Prediction: {x_prediction}')
+    print(f'Z Prediction: {z_prediction}')
+    print(f'Z Prediction: {w_prediction}')
+     
+    if x_prediction == 1:
+        print("Abnormal temperature detected")
+    else:
+        print("Temperature is normal")
+
+    if z_prediction == 1:
+        print("Abnormal heartbeat detected")
+    else:
+        print("heartbeat  is normal")
+    if w_prediction == 1:
+        print("Person Falling  detected")
+    else:
+        print("Person is normal")   
+
+    values_string = f"t{x_prediction:.0f}u{z_prediction:.0f}v{w_prediction:.0f}x "
+    time.sleep(2)
+    print(values_string)
+    time.sleep(3)
+    ser.write(bytes(values_string, 'utf-8'))
+    time.sleep(3)
+    print("Completed")
+    time.sleep(3)
